@@ -1,28 +1,35 @@
-// Import required modules
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose");
+const { createCatalogRouter } = require("./routes/catalogRoutes");
 
-// Import routes
-const productRoutes = require("./routes/productRoutes");
-const categoryRoutes = require("./routes/categoryRoutes");
-
-// Import database configuration
-require("./config/database");
-
-// Create Express app
-const app = express();
-const PORT = 5000;
-
-// Middleware setup
-app.use(cors());
-app.use(express.json());
-
-// Use routes
-app.use("/api", productRoutes);
-app.use("/api", categoryRoutes);
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+function createApp({
+  Product = require("./models/Product"),
+  Category = require("./models/Category"),
+  adminToken = process.env.ADMIN_TOKEN,
+  allowedOrigins = process.env.CORS_ORIGINS ||
+    "http://localhost:3000,http://localhost:3001",
+} = {}) {
+  const app = express();
+  app.disable("x-powered-by");
+  app.use(
+    cors({ origin: allowedOrigins.split(",").map((value) => value.trim()) })
+  );
+  app.use(express.json({ limit: "100kb" }));
+  app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+  app.use("/api", createCatalogRouter({ Product, Category, adminToken }));
+  app.use((req, res) => res.status(404).json({ error: "Route not found" }));
+  app.use((error, req, res, next) => {
+    if (error.type === "entity.parse.failed")
+      return res.status(400).json({ error: "Invalid JSON" });
+    if (error.name === "ValidationError" || error.name === "CastError")
+      return res.status(400).json({ error: "Invalid catalog data" });
+    if (error.code === 11000)
+      return res.status(409).json({ error: "This item already exists" });
+    console.error(error.message);
+    res
+      .status(error.status === 413 ? 413 : 500)
+      .json({ error: "Unable to complete request" });
+  });
+  return app;
+}
+module.exports = { createApp };
